@@ -4,7 +4,7 @@ from app.api.v1.api import api_router
 from app.core.config import settings
 
 app = FastAPI(
-    title=getattr(settings, "PROJECT_NAME", "Waste Management CRM"),
+    title=getattr(settings, "PROJECT_NAME", "Swayambhu Waste Management CRM"),
     openapi_url=f"{getattr(settings, 'API_V1_STR', '/api/v1')}/openapi.json",
 )
 
@@ -15,12 +15,14 @@ origins = [
     "http://localhost:3001",
     "https://swayambhuinfo.com",
     "https://www.swayambhuinfo.com",
-    "https://swayambhu-innovative-solutions.vercel.app/",
+    "https://swayambhu-innovative-solutions.vercel.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    # Matches any Vercel deployment/preview URL under vercel.app
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
