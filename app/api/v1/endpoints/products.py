@@ -26,13 +26,65 @@ from app.schemas.product import (
     MaterialSubCategoryResponse,
 )
 from app.services.product_document_service import ProductDocumentService
-
+from app.models.product import MaterialCategory
 router = APIRouter()
 
 
 # ---------------------------------------------------------------------------
 # Master: Material Subcategories (Polyal, HM, Tube, etc.)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# List all Products
+# ---------------------------------------------------------------------------
+@router.get("", response_model=list[ProductResponse])
+async def list_products(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    stmt = (
+        select(Product)
+        .options(
+            selectinload(Product.materials_used)
+            .joinedload(ProductMaterialComposition.sub_category)
+        )
+        .order_by(Product.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+# ---------------------------------------------------------------------------
+# Get Single Product by ID
+# ---------------------------------------------------------------------------
+@router.get("/{product_id}", response_model=ProductResponse)
+async def get_product(
+    product_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    stmt = (
+        select(Product)
+        .options(
+            selectinload(Product.materials_used)
+            .joinedload(ProductMaterialComposition.sub_category)
+        )
+        .where(Product.id == product_id)
+    )
+    res = await db.execute(stmt)
+    product = res.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found.")
+    return product
+
+@router.get("/categories")
+async def list_material_categories(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    stmt = select(MaterialCategory).order_by(MaterialCategory.name.asc())
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
 @router.post("/sub-categories", response_model=MaterialSubCategoryResponse, status_code=status.HTTP_201_CREATED)
 async def create_material_sub_category(
     sub_in: MaterialSubCategoryCreate,
