@@ -31,6 +31,13 @@ from app.models.sales import (
     DispatchStatus,
     PaymentStatus,
 )
+from app.models.product import (
+    MaterialCategory,
+    MaterialSubCategory,
+    Product,
+    ProductMaterialComposition,
+    WeightUnit,
+)
 from app.models.inventory import FinishedGoodsInventory
 
 __all__ = [
@@ -61,4 +68,9 @@ __all__ = [
     "DispatchStatus",
     "PaymentStatus",
     "FinishedGoodsInventory",
+    "MaterialCategory",
+        "MaterialSubCategory",
+        "Product",
+        "ProductMaterialComposition",
+        "WeightUnit",
 ]
