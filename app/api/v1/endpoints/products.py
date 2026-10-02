@@ -30,15 +30,17 @@ from app.services.product_document_service import ProductDocumentService
 
 router = APIRouter()
 
-# ---------------------------------------------------------------------------
-# 1. Static Literal Routes FIRST (Avoid UUID collision with /{product_id})
-# ---------------------------------------------------------------------------
+
+# ===========================================================================
+# 1. STATIC MASTER ROUTES FIRST (Prevents collision with /{product_id})
+# ===========================================================================
 
 @router.get("/categories")
 async def list_material_categories(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Retrieve all high-level material scrap categories."""
     stmt = select(MaterialCategory).order_by(MaterialCategory.name.asc())
     res = await db.execute(stmt)
     return res.scalars().all()
@@ -50,6 +52,7 @@ async def list_material_sub_categories(
     current_user: Annotated[User, Depends(get_current_user)],
     category_id: uuid.UUID | None = Query(None, description="Optional category filter"),
 ):
+    """Retrieve all material subcategories (Polyal, HM, Tube, etc.)."""
     stmt = select(MaterialSubCategory)
     if category_id:
         stmt = stmt.where(MaterialSubCategory.category_id == category_id)
@@ -64,6 +67,7 @@ async def create_material_sub_category(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Register a new material subcategory classification."""
     sub = MaterialSubCategory(**sub_in.model_dump())
     db.add(sub)
     await db.commit()
@@ -71,19 +75,21 @@ async def create_material_sub_category(
     return sub
 
 
-# ---------------------------------------------------------------------------
-# 2. Collection Level Routes
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 2. ROOT COLLECTION ROUTES
+# ===========================================================================
 
 @router.get("", response_model=list[ProductResponse])
 async def list_products(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """List all circular upcycled products with material compositions."""
     stmt = (
         select(Product)
         .options(
-            selectinload(Product.materials_used).joinedload(ProductMaterialComposition.sub_category)
+            selectinload(Product.materials_used)
+            .joinedload(ProductMaterialComposition.sub_category)
         )
         .order_by(Product.created_at.desc())
     )
@@ -97,6 +103,8 @@ async def create_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Create a new product with itemized material breakdown and auto-calculated mass balance."""
+    # Compute aggregate weight in KG
     total_weight = Decimal("0.000")
     for mat in prod_in.materials:
         w_kg = mat.weight if mat.unit == WeightUnit.KG else (mat.weight / Decimal("1000.00"))
@@ -114,9 +122,15 @@ async def create_product(
     db.add(product)
     await db.flush()
 
+    # Link material compositions & calculate percentage share
     for mat in prod_in.materials:
         w_kg = mat.weight if mat.unit == WeightUnit.KG else (mat.weight / Decimal("1000.00"))
-        share = ((w_kg / total_weight) * Decimal("100.00")).quantize(Decimal("0.01")) if total_weight > 0 else Decimal("0.00")
+        share = (
+            ((w_kg / total_weight) * Decimal("100.00")).quantize(Decimal("0.01"))
+            if total_weight > 0
+            else Decimal("0.00")
+        )
+
         comp = ProductMaterialComposition(
             product_id=product.id,
             sub_category_id=mat.sub_category_id,
@@ -128,10 +142,12 @@ async def create_product(
 
     await db.commit()
 
+    # Eager reload for serializable response
     stmt = (
         select(Product)
         .options(
-            selectinload(Product.materials_used).joinedload(ProductMaterialComposition.sub_category)
+            selectinload(Product.materials_used)
+            .joinedload(ProductMaterialComposition.sub_category)
         )
         .where(Product.id == product.id)
     )
@@ -139,9 +155,9 @@ async def create_product(
     return res.scalar_one()
 
 
-# ---------------------------------------------------------------------------
-# 3. Dynamic UUID Routes LAST
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 3. DYNAMIC UUID ENDPOINTS (Must stay below literal path endpoints)
+# ===========================================================================
 
 @router.get("/{product_id}", response_model=ProductResponse)
 async def get_product(
@@ -149,10 +165,12 @@ async def get_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Get single product details with complete material formulation."""
     stmt = (
         select(Product)
         .options(
-            selectinload(Product.materials_used).joinedload(ProductMaterialComposition.sub_category)
+            selectinload(Product.materials_used)
+            .joinedload(ProductMaterialComposition.sub_category)
         )
         .where(Product.id == product_id)
     )
@@ -170,6 +188,7 @@ async def update_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Update core attributes of a product."""
     product = await db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found.")
@@ -188,6 +207,7 @@ async def delete_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Remove product and cascade linked composition rows."""
     product = await db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found.")
@@ -202,6 +222,7 @@ async def get_product_materials(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Retrieve material formulation and weight breakdown for a product."""
     stmt = (
         select(ProductMaterialComposition)
         .options(selectinload(ProductMaterialComposition.sub_category))
@@ -209,6 +230,7 @@ async def get_product_materials(
     )
     res = await db.execute(stmt)
     records = res.scalars().all()
+
     return [
         ProductMaterialResponse(
             id=item.id,
@@ -229,6 +251,7 @@ async def generate_product_pdf(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Stream generated ReportLab Product Specification PDF."""
     stmt = (
         select(Product)
         .options(
@@ -257,10 +280,16 @@ async def get_product_quantity(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Get active stock quantity for a product."""
     product = await db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found.")
-    return {"id": product.id, "sku": product.sku, "total_quantity": product.total_quantity, "unit_measure": product.unit_measure}
+    return {
+        "id": product.id,
+        "sku": product.sku,
+        "total_quantity": product.total_quantity,
+        "unit_measure": product.unit_measure,
+    }
 
 
 @router.put("/{product_id}/quantity")
@@ -270,6 +299,7 @@ async def update_product_quantity(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Adjust active inventory count for a product."""
     product = await db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found.")
