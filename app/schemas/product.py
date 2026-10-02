@@ -81,3 +81,15 @@ class ProductResponse(BaseModel):
     updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class MaterialCategoryBase(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    description: str | None = None
+
+class MaterialCategoryCreate(MaterialCategoryBase):
+    pass
+class MaterialCategoryResponse(MaterialCategoryBase):
+    id: uuid.UUID
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

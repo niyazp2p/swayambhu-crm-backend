@@ -34,6 +34,42 @@ router = APIRouter()
 # ===========================================================================
 # 1. STATIC MASTER ROUTES FIRST (Prevents collision with /{product_id})
 # ===========================================================================
+@router.get("/categories", response_model=list[MaterialCategoryResponse])
+async def list_material_categories(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Retrieve all high-level material scrap categories."""
+    stmt = select(MaterialCategory).order_by(MaterialCategory.name.asc())
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+@router.post("/categories", response_model=MaterialCategoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_material_category(
+    cat_in: MaterialCategoryCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Register a new parent material category."""
+    # Check if category already exists
+    existing = await db.scalar(
+        select(MaterialCategory).where(MaterialCategory.name.ilike(cat_in.name.strip()))
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Category '{cat_in.name}' already exists."
+        )
+
+    category = MaterialCategory(
+        name=cat_in.name.strip(),
+        description=cat_in.description.strip() if cat_in.description else None
+    )
+    db.add(category)
+    await db.commit()
+    await db.refresh(category)
+    return category
 
 @router.get("/categories")
 async def list_material_categories(
