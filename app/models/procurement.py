@@ -71,8 +71,8 @@ class WasteGrade(Base, TimestampMixin):
     plant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("plants.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    category_name: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g., Plastic, Metal, Paper
-    grade_code: Mapped[str] = mapped_column(String(50), nullable=False)       # e.g., HDPE, PET, Ferrous
+    category_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    grade_code: Mapped[str] = mapped_column(String(50), nullable=False)
     current_rate_per_kg: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     deduction_method: Mapped[DeductionMethod] = mapped_column(
         Enum(DeductionMethod, name="deduction_method_enum"),
@@ -100,6 +100,7 @@ class GRNRecord(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("waste_grades.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     vehicle_number: Mapped[str] = mapped_column(String(30), nullable=False)
+    raw_material: Mapped[str] = mapped_column(String(50), default="MLP plastic", nullable=False)
 
     # Weights (in Kilograms)
     gross_weight: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
@@ -127,7 +128,9 @@ class GRNRecord(Base, TimestampMixin):
 
     # Relationships
     vendor: Mapped["Vendor"] = relationship("Vendor", back_populates="grns")
-    batch: Mapped["Batch | None"] = relationship("Batch", back_populates="grn", uselist=False)
+    batch: Mapped["Batch | None"] = relationship(
+        "Batch", back_populates="grn", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class Batch(Base, TimestampMixin):
@@ -142,7 +145,7 @@ class Batch(Base, TimestampMixin):
     )
     batch_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     grn_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("grn_records.id", ondelete="SET NULL"), nullable=True, index=True
+        UUID(as_uuid=True), ForeignKey("grn_records.id", ondelete="CASCADE"), nullable=True, index=True
     )
     stage: Mapped[BatchStage] = mapped_column(
         Enum(BatchStage, name="batch_stage_enum"), default=BatchStage.RAW, nullable=False

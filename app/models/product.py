@@ -40,7 +40,7 @@ class MaterialCategory(Base, TimestampMixin):
 
 
 class MaterialSubCategory(Base, TimestampMixin):
-    """Material Subcategory (e.g., Polyal, HM, Tube, LDPE, HDPE)."""
+    """Material Subcategory (e.g., Polyal, HM plastic, MLP plastic, Tube, Iron)."""
     __tablename__ = "material_sub_categories"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -50,7 +50,7 @@ class MaterialSubCategory(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("material_categories.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True) # e.g., SUB_POLYAL, SUB_HM
+    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
@@ -61,7 +61,7 @@ class MaterialSubCategory(Base, TimestampMixin):
 
 
 class Product(Base, TimestampMixin):
-    """Finished upcycled products (e.g., Eco-Board, Handwashing Station, School Desk)."""
+    """Finished upcycled products (e.g., Eco-Board, School Desk, Sanitation Station)."""
     __tablename__ = "products"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -70,14 +70,14 @@ class Product(Base, TimestampMixin):
     sku: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    dimensions: Mapped[str | None] = mapped_column(String(100), nullable=True) # e.g., 8x4 ft x 12mm
+    dimensions: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Stock & Quantity Tracking
     total_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    unit_measure: Mapped[str] = mapped_column(String(30), default="PIECES", nullable=False) # PIECES / UNITS
+    unit_measure: Mapped[str] = mapped_column(String(30), default="PIECES", nullable=False)
 
-    # Aggregate Weight (computed or benchmarked)
+    # Total Weight (KG)
     total_weight_kg: Mapped[Decimal] = mapped_column(Numeric(10, 3), default=Decimal("0.000"), nullable=False)
 
     # Relationships
@@ -90,7 +90,7 @@ class Product(Base, TimestampMixin):
 
 
 class ProductMaterialComposition(Base, TimestampMixin):
-    """Breakdown of raw scrap materials consumed per unit product."""
+    """Itemized scrap feedstock recipe consumed per unit product."""
     __tablename__ = "product_material_compositions"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -103,7 +103,6 @@ class ProductMaterialComposition(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("material_sub_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
 
-    # Weight Formulation
     weight: Mapped[Decimal] = mapped_column(Numeric(10, 3), nullable=False)
     unit: Mapped[WeightUnit] = mapped_column(
         Enum(WeightUnit, name="weight_unit_enum"), default=WeightUnit.KG, nullable=False
@@ -112,7 +111,9 @@ class ProductMaterialComposition(Base, TimestampMixin):
 
     # Relationships
     product: Mapped["Product"] = relationship("Product", back_populates="materials_used")
-    sub_category: Mapped["MaterialSubCategory"] = relationship("MaterialSubCategory", back_populates="product_materials", lazy="joined")
+    sub_category: Mapped["MaterialSubCategory"] = relationship(
+        "MaterialSubCategory", back_populates="product_materials", lazy="joined"
+    )
 
     __table_args__ = (
         UniqueConstraint("product_id", "sub_category_id", name="uq_product_material_subcategory"),

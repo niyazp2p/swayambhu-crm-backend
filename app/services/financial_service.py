@@ -11,6 +11,7 @@ from app.models.sales import DispatchOrder
 from app.schemas.financials import (
     ExpenseBreakdown,
     FinancialSummaryResponse,
+    RawMaterialCategoryExpense,
 )
 
 
@@ -45,11 +46,13 @@ class FinancialService:
         total_sales_revenue = Decimal(str(sales_raw)) if sales_raw is not None else Decimal("0.00")
 
         # ---------------------------------------------------------------------
-        # 2. Raw Material Feedstock COGS (Directly sum stored intake payable)
-        # Using cast(Date) to avoid timezone-offset crashes on created_at
+        # 2. Raw Material Feedstock COGS, Paid Settled & Unpaid Dues
         # ---------------------------------------------------------------------
         cogs_stmt = (
-            select(func.coalesce(func.sum(GRNRecord.total_payable_amount), Decimal("0.00")))
+            select(
+                func.coalesce(func.sum(GRNRecord.total_payable_amount), Decimal("0.00")),
+                func.coalesce(func.sum(GRNRecord.amount_settled), Decimal("0.00")),
+            )
             .select_from(GRNRecord)
             .where(
                 and_(
@@ -59,8 +62,38 @@ class FinancialService:
                 )
             )
         )
-        cogs_raw = (await self.db.execute(cogs_stmt)).scalar()
-        raw_material_cogs = Decimal(str(cogs_raw)) if cogs_raw is not None else Decimal("0.00")
+        cogs_row = (await self.db.execute(cogs_stmt)).one()
+        raw_material_cogs = Decimal(str(cogs_row[0])) if cogs_row[0] is not None else Decimal("0.00")
+        raw_material_settled = Decimal(str(cogs_row[1])) if cogs_row[1] is not None else Decimal("0.00")
+        raw_material_outstanding = raw_material_cogs - raw_material_settled
+
+        # ---------------------------------------------------------------------
+        # 2B. COGS Breakdown by Raw Material Category
+        # ---------------------------------------------------------------------
+        mat_breakdown_stmt = (
+            select(
+                GRNRecord.raw_material,
+                func.coalesce(func.sum(GRNRecord.total_payable_amount), Decimal("0.00")),
+                func.coalesce(func.sum(GRNRecord.accepted_net_weight), Decimal("0.00")),
+            )
+            .where(
+                and_(
+                    GRNRecord.plant_id == plant_id,
+                    cast(GRNRecord.created_at, Date) >= from_date,
+                    cast(GRNRecord.created_at, Date) <= to_date,
+                )
+            )
+            .group_by(GRNRecord.raw_material)
+        )
+        mat_rows = (await self.db.execute(mat_breakdown_stmt)).all()
+        raw_materials_breakdown = [
+            RawMaterialCategoryExpense(
+                raw_material=row[0],
+                total_cost=Decimal(str(row[1])),
+                total_accepted_kg=Decimal(str(row[2])),
+            )
+            for row in mat_rows
+        ]
 
         # ---------------------------------------------------------------------
         # 3. Monthly Disbursed Payroll Wages
@@ -134,6 +167,8 @@ class FinancialService:
             total_sales_revenue=round(total_sales_revenue, 2),
             expenses=ExpenseBreakdown(
                 raw_material_cogs=round(raw_material_cogs, 2),
+                raw_material_settled=round(raw_material_settled, 2),
+                raw_material_outstanding_liability=round(raw_material_outstanding, 2),
                 payroll_wages=round(payroll_wages, 2),
                 electricity_cost=electricity_cost,
                 diesel_cost=diesel_cost,
@@ -144,4 +179,5 @@ class FinancialService:
             net_operating_ebitda=round(net_ebitda, 2),
             ebitda_margin_pct=ebitda_margin_pct,
             ebitda_per_processed_ton=ebitda_per_ton,
+            raw_materials_breakdown=raw_materials_breakdown,
         )

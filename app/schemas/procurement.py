@@ -1,9 +1,22 @@
 import uuid
 from decimal import Decimal
 from datetime import datetime
-from pydantic import BaseModel, Field
+from typing import Literal
+from pydantic import BaseModel, Field, ConfigDict
+
 from app.models.procurement import VendorType, BatchStage, DeductionMethod
-from app.models.procurement import BatchStage
+
+RAW_MATERIAL_TYPES = Literal[
+    "MLP plastic",
+    "HM plastic",
+    "Polyal",
+    "polyster roll",
+    "tube",
+    "Iron",
+]
+
+PAYMENT_STATUS_TYPES = Literal["UNPAID", "PAID"]
+
 
 class VendorCreate(BaseModel):
     name: str
@@ -12,6 +25,8 @@ class VendorCreate(BaseModel):
     address: str | None = None
     bank_account_no: str | None = None
     bank_ifsc: str | None = None
+    gstin: str | None = None
+    pan_number: str | None = None
 
 
 class VendorResponse(VendorCreate):
@@ -20,8 +35,7 @@ class VendorResponse(VendorCreate):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WasteGradeCreate(BaseModel):
@@ -36,14 +50,15 @@ class WasteGradeResponse(WasteGradeCreate):
     plant_id: uuid.UUID
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GRNCreate(BaseModel):
     vendor_id: uuid.UUID
     waste_grade_id: uuid.UUID
     vehicle_number: str
+    raw_material: RAW_MATERIAL_TYPES = "MLP plastic"
+    payment_status: PAYMENT_STATUS_TYPES = "UNPAID"
     gross_weight: Decimal = Field(..., gt=0)
     tare_weight: Decimal = Field(..., ge=0)
     moisture_percentage: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
@@ -60,6 +75,9 @@ class GRNResponse(BaseModel):
     vendor_id: uuid.UUID
     waste_grade_id: uuid.UUID
     vehicle_number: str
+    raw_material: str
+    payment_status: str
+    amount_settled: Decimal
     gross_weight: Decimal
     tare_weight: Decimal
     net_weight: Decimal
@@ -68,8 +86,8 @@ class GRNResponse(BaseModel):
     total_payable_amount: Decimal
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class BatchResponse(BaseModel):
     id: uuid.UUID
@@ -78,11 +96,12 @@ class BatchResponse(BaseModel):
     grn_id: uuid.UUID | None = None
     stage: BatchStage
     yard_location: str | None = None
+    initial_quantity_kg: Decimal
     current_quantity_kg: Decimal
+    is_consumed: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BatchUpdate(BaseModel):

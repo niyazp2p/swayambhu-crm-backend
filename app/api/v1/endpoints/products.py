@@ -146,7 +146,6 @@ async def list_products(
     res = await db.execute(stmt)
     products = res.scalars().all()
 
-    # Normalize response to match ProductMaterialResponse shape
     response_list = []
     for prod in products:
         mats = [
@@ -187,7 +186,6 @@ async def create_product(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Create a new product with itemized material breakdown and auto-calculated mass balance."""
-    # Check for SKU collision
     existing = await db.scalar(
         select(Product).where(Product.sku == prod_in.sku.strip().upper())
     )
@@ -215,7 +213,6 @@ async def create_product(
     db.add(product)
     await db.flush()
 
-    # Link material compositions & calculate percentage shares
     for mat in prod_in.materials:
         w_kg = mat.weight if mat.unit == WeightUnit.KG else (mat.weight / Decimal("1000.00"))
         share = (
@@ -235,7 +232,7 @@ async def create_product(
 
     await db.commit()
 
-    # Reload product with joined relationships
+    # Re-fetch eager with join
     stmt = (
         select(Product)
         .options(
@@ -277,7 +274,7 @@ async def create_product(
 
 
 # ===========================================================================
-# 3. DYNAMIC UUID ENDPOINTS (Must stay below literal path endpoints)
+# 3. DYNAMIC UUID ENDPOINTS (Must stay below literal routes)
 # ===========================================================================
 
 @router.get("/{product_id}", response_model=ProductResponse)
@@ -346,7 +343,6 @@ async def update_product(
 
     await db.commit()
 
-    # Re-fetch eager
     stmt = (
         select(Product)
         .options(

@@ -1,10 +1,10 @@
 import uuid
 from typing import Annotated
 from datetime import datetime
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import get_current_user, require_roles
 from app.db.session import get_db
@@ -195,6 +195,7 @@ async def create_grn_intake(
         raise HTTPException(status_code=400, detail=str(e))
 
     grn_num = f"GRN-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    settled_amount = calc["total_payable_amount"] if grn_in.payment_status == "PAID" else Decimal("0.00")
 
     grn = GRNRecord(
         plant_id=target_plant,
@@ -202,6 +203,9 @@ async def create_grn_intake(
         vendor_id=grn_in.vendor_id,
         waste_grade_id=grn_in.waste_grade_id,
         vehicle_number=grn_in.vehicle_number,
+        raw_material=grn_in.raw_material,
+        payment_status=grn_in.payment_status,
+        amount_settled=settled_amount,
         gross_weight=grn_in.gross_weight,
         tare_weight=grn_in.tare_weight,
         net_weight=calc["net_weight"],
@@ -218,7 +222,6 @@ async def create_grn_intake(
     db.add(grn)
     await db.flush()
 
-    # Fixed: Populates initial_quantity_kg and is_consumed to meet schema constraints
     batch = Batch(
         plant_id=target_plant,
         batch_code=f"BATCH-RAW-{grn.grn_number}",
@@ -255,6 +258,46 @@ async def list_grn_records(
     query = query.order_by(GRNRecord.created_at.desc()).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.delete("/grn/{grn_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_grn_intake(
+    grn_id: uuid.UUID,
+    current_user: Annotated[
+        User,
+        Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.PLANT_MANAGER)),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Delete a GRN record and clean up its corresponding raw intake batch."""
+    grn = await db.get(GRNRecord, grn_id)
+    if not grn:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="GRN record not found.",
+        )
+
+    if current_user.role != UserRole.SUPER_ADMIN and grn.plant_id != current_user.plant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized to delete intake records from other facilities.",
+        )
+
+    # Check linked batch lifecycle state
+    batch_res = await db.execute(select(Batch).where(Batch.grn_id == grn_id))
+    batch = batch_res.scalar_one_or_none()
+
+    if batch:
+        if batch.is_consumed or batch.stage != BatchStage.RAW:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete GRN: Associated raw batch is already consumed or in sorting.",
+            )
+        await db.delete(batch)
+
+    await db.delete(grn)
+    await db.commit()
+    return None
 
 
 # ----------------- INTAKE BATCHES -----------------

@@ -27,7 +27,7 @@ class MaterialCategoryResponse(MaterialCategoryBase):
 
 
 # ===========================================================================
-# 2. Material Subcategory Schemas (Polyal, HM, Tube, etc.)
+# 2. Material Subcategory Schemas
 # ===========================================================================
 
 class MaterialSubCategoryBase(BaseModel):

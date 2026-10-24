@@ -12,6 +12,7 @@ from app.models.plant import Plant
 from app.models.operations import DowntimeReason
 from app.schemas.operations import (
     DPRCreate,
+    DPRUpdate,
     DPRResponse,
     DowntimeLogResponse,
     DowntimeLogStandaloneCreate,
@@ -25,14 +26,13 @@ async def _resolve_plant_context(
     db: AsyncSession, current_user: User, explicit_plant_id: uuid.UUID | None = None
 ) -> uuid.UUID:
     """
-    Resolves the plant context:
+    Resolves plant context:
     1. Explicit query or payload plant_id.
     2. Assigned plant_id for plant-scoped roles (Plant Manager, Operator).
     3. Auto-fallback to active operational facility for Super Admin.
     """
     target_plant = explicit_plant_id or current_user.plant_id
 
-    # Auto-resolve active facility for Super Admin if unassigned
     if not target_plant and current_user.role == UserRole.SUPER_ADMIN:
         target_plant = await db.scalar(
             select(Plant.id).where(Plant.is_active.is_(True)).limit(1)
@@ -43,7 +43,7 @@ async def _resolve_plant_context(
     if not target_plant:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Plant context required. No active plant registered in the database.",
+            detail="Plant context required. No active plant registered in database.",
         )
 
     if current_user.role != UserRole.SUPER_ADMIN and current_user.plant_id != target_plant:
@@ -110,6 +110,21 @@ async def get_dpr_by_id(
     return await service.get_dpr_by_id(dpr_id=dpr_id, plant_id=plant_id)
 
 
+@router.patch("/dpr/{dpr_id}", response_model=DPRResponse)
+async def update_dpr(
+    dpr_id: uuid.UUID,
+    dpr_in: DPRUpdate,
+    current_user: Annotated[
+        User,
+        Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.PLANT_MANAGER)),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    plant_id = None if current_user.role == UserRole.SUPER_ADMIN else current_user.plant_id
+    service = OperationsService(db)
+    return await service.update_dpr(dpr_id=dpr_id, plant_id=plant_id, payload=dpr_in)
+
+
 # =====================================================================
 # 2. MACHINE DOWNTIME TRACKING
 # =====================================================================
@@ -145,3 +160,18 @@ async def list_downtime_records(
     return await service.list_downtimes(
         plant_id=target_plant, reason=reason, limit=limit, offset=offset
     )
+
+
+@router.delete("/downtime/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_downtime_record(
+    log_id: uuid.UUID,
+    current_user: Annotated[
+        User,
+        Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.PLANT_MANAGER)),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    plant_id = None if current_user.role == UserRole.SUPER_ADMIN else current_user.plant_id
+    service = OperationsService(db)
+    await service.delete_downtime(log_id=log_id, plant_id=plant_id)
+    return None

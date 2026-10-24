@@ -23,7 +23,7 @@ class OperationsService:
     async def create_dpr(
         self, plant_id: uuid.UUID, supervisor_id: uuid.UUID, payload: DPRCreate
     ) -> DailyProgressReport:
-        # Check duplicate submission for date
+        # Check duplicate submission for date in this facility
         existing = await self.db.scalar(
             select(DailyProgressReport.id).where(
                 DailyProgressReport.plant_id == plant_id,
@@ -33,7 +33,7 @@ class OperationsService:
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"A Daily Progress Report for plant {plant_id} on {payload.report_date} already exists.",
+                detail=f"A Daily Progress Report for plant on {payload.report_date} already exists.",
             )
 
         # 1. Compute production yield & mass balance variance
@@ -62,7 +62,7 @@ class OperationsService:
         self.db.add(dpr)
         await self.db.flush()
 
-        # 3. Insert Production Logs and update Finished Goods Stock
+        # 3. Insert Production Logs and atomically update Finished Goods Stock
         for item in payload.production_items:
             prod_log = ProductionLog(
                 dpr_id=dpr.id,
@@ -72,7 +72,7 @@ class OperationsService:
             )
             self.db.add(prod_log)
 
-            # Atomically lock ONLY the inventory table (prevents outer join lock error)
+            # Atomically lock ONLY the inventory table (prevents join lock errors)
             inv_stmt = (
                 select(FinishedGoodsInventory)
                 .where(
@@ -162,6 +162,23 @@ class OperationsService:
         res = await self.db.execute(query.limit(limit).offset(offset))
         return list(res.scalars().all())
 
+    async def update_dpr(
+        self, dpr_id: uuid.UUID, plant_id: uuid.UUID | None, payload: DPRUpdate
+    ) -> DailyProgressReport:
+        dpr = await self.get_dpr_by_id(dpr_id, plant_id=plant_id)
+        if payload.electricity_kwh is not None:
+            dpr.electricity_kwh = payload.electricity_kwh
+        if payload.diesel_liters is not None:
+            dpr.diesel_liters = payload.diesel_liters
+        if payload.strapping_wire_kg is not None:
+            dpr.strapping_wire_kg = payload.strapping_wire_kg
+        if payload.remarks is not None:
+            dpr.remarks = payload.remarks
+
+        await self.db.commit()
+        await self.db.refresh(dpr)
+        return dpr
+
     async def create_standalone_downtime(
         self, plant_id: uuid.UUID, payload: DowntimeLogStandaloneCreate
     ) -> DowntimeLog:
@@ -192,3 +209,20 @@ class OperationsService:
 
         res = await self.db.execute(query.limit(limit).offset(offset))
         return list(res.scalars().all())
+
+    async def delete_downtime(
+        self, log_id: uuid.UUID, plant_id: uuid.UUID | None
+    ) -> None:
+        downtime = await self.db.get(DowntimeLog, log_id)
+        if not downtime:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Downtime record not found.",
+            )
+        if plant_id and downtime.plant_id != plant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized to delete downtime outside assigned facility.",
+            )
+        await self.db.delete(downtime)
+        await self.db.commit()

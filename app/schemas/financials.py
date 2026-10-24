@@ -18,8 +18,18 @@ class FinancialSummaryRequest(BaseModel):
     )
 
 
+class RawMaterialCategoryExpense(BaseModel):
+    raw_material: str
+    total_cost: Decimal
+    total_accepted_kg: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ExpenseBreakdown(BaseModel):
     raw_material_cogs: Decimal
+    raw_material_settled: Decimal
+    raw_material_outstanding_liability: Decimal
     payroll_wages: Decimal
     electricity_cost: Decimal
     diesel_cost: Decimal
@@ -40,5 +50,6 @@ class FinancialSummaryResponse(BaseModel):
     net_operating_ebitda: Decimal
     ebitda_margin_pct: Decimal
     ebitda_per_processed_ton: Decimal
+    raw_materials_breakdown: list[RawMaterialCategoryExpense] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

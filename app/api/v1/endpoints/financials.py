@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,31 +20,43 @@ async def _resolve_plant_context(
     db: AsyncSession, current_user: User, plant_id: uuid.UUID | None
 ) -> uuid.UUID:
     """
-    Resolves the plant context:
-    1. If plant_id query param is supplied, prioritize it.
-    2. If user is plant-scoped (Plant Manager, Operator), use user's plant_id.
-    3. If Super Admin omits plant_id, auto-resolve the primary active plant facility.
+    Resolves the facility context:
+    1. If user is Super Admin and provides plant_id, use it.
+    2. If user is Super Admin and omits plant_id, dynamically fallback to the active plant.
+    3. If user is plant-scoped (Plant Manager, Operator), enforce their assigned plant_id.
     """
-    if plant_id:
-        return plant_id
+    if current_user.role == UserRole.SUPER_ADMIN:
+        if plant_id:
+            return plant_id
 
-    if current_user.role != UserRole.SUPER_ADMIN and current_user.plant_id:
-        return current_user.plant_id
-
-    # Super Admin fallback: dynamically select the first active operational facility
-    active_plant = await db.scalar(
-        select(Plant.id).where(Plant.is_active.is_(True)).limit(1)
-    )
-    if not active_plant:
-        # Fallback to any plant row if none are explicitly flagged active
-        active_plant = await db.scalar(select(Plant.id).limit(1))
-
-    if not active_plant:
-        raise HTTPException(
-            status_code=400,
-            detail="No operational plant facility registered in database.",
+        # Fallback to the active facility
+        active_plant = await db.scalar(
+            select(Plant.id).where(Plant.is_active.is_(True)).limit(1)
         )
-    return active_plant
+        if not active_plant:
+            active_plant = await db.scalar(select(Plant.id).limit(1))
+
+        if not active_plant:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Plant context required. No active plant registered in the database.",
+            )
+        return active_plant
+
+    # Non-super-admin user validation
+    if not current_user.plant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not assigned to a plant facility.",
+        )
+
+    if plant_id and plant_id != current_user.plant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Cannot query financial records for an unassigned facility.",
+        )
+
+    return current_user.plant_id
 
 
 @router.get("/summary", response_model=FinancialSummaryResponse)
@@ -57,10 +69,22 @@ async def get_plant_financial_summary(
     ],
     db: Annotated[AsyncSession, Depends(get_db)],
     plant_id: uuid.UUID | None = Query(None, description="Optional override for Super Admin"),
-    electricity_rate: Decimal = Query(Decimal("8.50"), ge=0, description="Rate per kWh"),
-    diesel_rate: Decimal = Query(Decimal("92.00"), ge=0, description="Rate per Liter"),
-    wire_rate: Decimal = Query(Decimal("75.00"), ge=0, description="Rate per kg"),
+    electricity_rate: Decimal = Query(
+        Decimal("8.50"), ge=0, alias="electricity_rate", description="Rate per kWh"
+    ),
+    diesel_rate: Decimal = Query(
+        Decimal("92.00"), ge=0, alias="diesel_rate", description="Rate per Liter"
+    ),
+    wire_rate: Decimal = Query(
+        Decimal("75.00"), ge=0, alias="wire_rate", description="Rate per kg"
+    ),
 ):
+    if from_date > to_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date range: 'from_date' cannot be later than 'to_date'.",
+        )
+
     target_plant = await _resolve_plant_context(db, current_user, plant_id)
 
     service = FinancialService(db)

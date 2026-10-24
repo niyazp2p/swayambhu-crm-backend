@@ -31,13 +31,13 @@ class ProductDocumentService:
 
         # Header
         elements.append(Paragraph(f"<b>SWAYAMBHU PRODUCT SPEC SHEET: {product.name}</b>", title_style))
-        elements.append(Paragraph(f"SKU: {product.sku} | Generated Date: Standard Release", body_style))
+        elements.append(Paragraph(f"SKU: {product.sku} | Haridwar SIDCUL Facility Node HW-01", body_style))
         elements.append(Spacer(1, 16))
 
         # Basic Info Table
         meta_data = [
             ["Product SKU:", product.sku, "Available Stock:", f"{product.total_quantity} {product.unit_measure}"],
-            ["Dimensions:", product.dimensions or "N/A", "Unit Weight (KG):", f"{product.total_weight_kg:.3f} kg"],
+            ["Dimensions:", product.dimensions or "N/A", "Unit Weight (KG):", f"{float(product.total_weight_kg):.3f} kg"],
         ]
         meta_table = Table(meta_data, colWidths=[110, 160, 110, 160])
         meta_table.setStyle(TableStyle([
@@ -61,8 +61,8 @@ class ProductDocumentService:
             sub = item.sub_category
             cat_name = sub.category.name if sub and sub.category else "Standard Scrap"
             sub_name = sub.name if sub else "Scrap Item"
-            share = f"{item.percentage_share:.1f}%" if item.percentage_share else "-"
-            mat_rows.append([cat_name, sub_name, f"{item.weight:.3f}", item.unit.value, share])
+            share = f"{float(item.percentage_share):.1f}%" if item.percentage_share else "-"
+            mat_rows.append([cat_name, sub_name, f"{float(item.weight):.3f}", item.unit.value, share])
 
         mat_table = Table(mat_rows, colWidths=[120, 130, 100, 90, 100])
         mat_table.setStyle(TableStyle([
