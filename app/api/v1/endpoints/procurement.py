@@ -5,6 +5,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.core.dependencies import get_current_user, require_roles
 from app.db.session import get_db
@@ -24,6 +25,10 @@ from app.schemas.procurement import (
 from app.services.procurement_service import calculate_grn_weights_and_cost
 
 router = APIRouter()
+
+
+class GRNSettlementUpdate(BaseModel):
+    payment_status: str  # "PAID" or "UNPAID"
 
 
 # ----------------- VENDORS -----------------
@@ -258,6 +263,42 @@ async def list_grn_records(
     query = query.order_by(GRNRecord.created_at.desc()).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.patch("/grn/{grn_id}/settlement", response_model=GRNResponse)
+async def toggle_grn_settlement_status(
+    grn_id: uuid.UUID,
+    payload: GRNSettlementUpdate,
+    current_user: Annotated[
+        User,
+        Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.PLANT_MANAGER, UserRole.WEIGHBRIDGE_OPERATOR)),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Toggle payment settlement between PAID and UNPAID."""
+    grn = await db.get(GRNRecord, grn_id)
+    if not grn:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="GRN record not found."
+        )
+
+    target_status = payload.payment_status.upper().strip()
+    if target_status not in ["PAID", "UNPAID"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment status must be 'PAID' or 'UNPAID'."
+        )
+
+    grn.payment_status = target_status
+    if target_status == "PAID":
+        grn.amount_settled = grn.total_payable_amount
+    else:
+        grn.amount_settled = Decimal("0.00")
+
+    await db.commit()
+    await db.refresh(grn)
+    return grn
 
 
 @router.delete("/grn/{grn_id}", status_code=status.HTTP_204_NO_CONTENT)
