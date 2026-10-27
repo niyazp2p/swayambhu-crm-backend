@@ -439,7 +439,15 @@ async def download_gate_pass_pdf(
 @router.get("/dispatch/{dispatch_id}/invoice")
 async def download_tax_invoice_pdf(
     dispatch_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.SUPER_ADMIN,
+                UserRole.WEIGHBRIDGE_OPERATOR,
+            )
+        ),
+    ],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     stmt = (
@@ -455,7 +463,17 @@ async def download_tax_invoice_pdf(
     dispatch = result.scalar_one_or_none()
 
     if not dispatch:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dispatch order not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dispatch order not found.",
+        )
+
+    # Multi-tenant facility isolation: Managers cannot download invoices from other plants
+    if current_user.role != UserRole.SUPER_ADMIN and dispatch.plant_id != current_user.plant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted to records from assigned plant.",
+        )
 
     pdf_stream = DocumentService.generate_invoice_pdf(
         dispatch=dispatch,
@@ -466,5 +484,7 @@ async def download_tax_invoice_pdf(
     return StreamingResponse(
         pdf_stream,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=TaxInvoice_{dispatch.dispatch_number}.pdf"},
+        headers={
+            "Content-Disposition": f"attachment; filename=TaxInvoice_{dispatch.dispatch_number}.pdf"
+        },
     )
