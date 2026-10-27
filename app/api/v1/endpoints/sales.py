@@ -445,6 +445,7 @@ async def download_tax_invoice_pdf(
             require_roles(
                 UserRole.SUPER_ADMIN,
                 UserRole.WEIGHBRIDGE_OPERATOR,
+                UserRole.PLANT_MANAGER,
             )
         ),
     ],
